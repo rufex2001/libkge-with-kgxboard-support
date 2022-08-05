@@ -4,7 +4,7 @@ This is a fork of [LibKGE](https://github.com/uma-pi1/kge) that supports the
 dumping of top predictions made by models in the format required by 
 [KGxBoard](https://github.com/neulab/KGxBoard). Other than this feature, it's
 exactly the same as LibKGE, so for general instructions on using LibKGE, please 
-check out its [README](#libkge's-readme).
+check out its [README](#using-libkge).
 
 ## Instructions for dumping top predictions for KGxBoard
 
@@ -62,7 +62,7 @@ kge valid <folder> --checkpoint fb15k-237-complex.pt \
                    --entity_ranking.predictions.use_strings True \
 ```
 
-## LibKGE's README 
+## Using LibKGE
 
 The following is LibKGE's README at the time of this fork's creation.
 
