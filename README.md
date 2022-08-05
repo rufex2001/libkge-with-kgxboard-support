@@ -1,5 +1,71 @@
 # <img src="docs/source/images/logo/libkge-header-2880.png" alt="LibKGE: A knowledge graph embedding library" width="80%">
 
+This is a fork of [LibKGE](https://github.com/uma-pi1/kge) that supports the
+dumping of top predictions made by models in the format required by 
+[KGxBoard](https://github.com/neulab/KGxBoard). Other than this feature, it's
+exactly the same as LibKGE, so for general instructions on using LibKGE, please 
+check out its [README](#libkge's-readme).
+
+## Instructions for dumping top predictions for KGxBoard
+
+The following instructions assume you've already installed and were able to
+run LibKGE to train and evaluate models. 
+
+To dump the top k predictions of a pretrained LibKGE model, run the following
+command in the folder that contains the checkpoint file that stores the model 
+and its corresponding config file:
+
+```sh
+# Evaluate a model on the validation split and dump top 10 predictions
+kge valid <folder> --entity_ranking.predictions.dump True \
+                   --entity_ranking.predictions.top_k 10 \
+                   --entity_ranking.predictions.filename top_predictions.json
+```
+
+The top predictions will be dumped to the file "top_predictions.json". In 
+addition, the file "top_predictions_hyperparameters.json" will be created, which 
+contains the hyperparameters of that same model. 
+
+If the data is available on LibKGE, you can dump the predictions in 
+human-readable strings instead of the internal IDs of the knowledge graph.
+For example, LibKGE currently supports this for FB15K and FB15K-237 datasets, so
+with a model that was trained on those datasets, you can run the following:
+
+```sh
+# Evaluate a model on the validation split and dump readable top predictions 
+kge valid <folder> --entity_ranking.predictions.dump True \
+                   --entity_ranking.predictions.top_k 10 \
+                   --entity_ranking.predictions.filename top_predictions.json
+                   --entity_ranking.predictions.use_strings True \
+```
+
+To quickly test all of this out, you can download the checkpoint and config 
+files of one of the pretrained models available in LibKGE's README. For example, 
+this 
+[pretrained model](http://web.informatik.uni-mannheim.de/pi1/iclr2020-models/fb15k-237-complex.pt) 
+and its 
+[config file](http://web.informatik.uni-mannheim.de/pi1/iclr2020-models/fb15k-237-complex.yaml).
+Then rename the config file to "config.yaml" and the checkpoint file to 
+"checkpoint_best.pt". Running the commands above on the folder containing
+this model and its config should provide this model's top predictions.
+
+Finally, you can also specify the checkpoint that should be used to evaluate the
+model. For example, if you don't rename the checkpoint file as described in the
+example above, the following command will be required:
+
+```sh
+# Evaluate a model on the validation split and dump readable top predictions 
+kge valid <folder> --checkpoint fb15k-237-complex.pt \
+                   --entity_ranking.predictions.dump True \
+                   --entity_ranking.predictions.top_k 10 \
+                   --entity_ranking.predictions.filename top_predictions.json
+                   --entity_ranking.predictions.use_strings True \
+```
+
+## LibKGE's README 
+
+The following is LibKGE's README at the time of this fork's creation.
+
 LibKGE is a PyTorch-based library for efficient training, evaluation, and
 hyperparameter optimization of [knowledge graph
 embeddings](https://ieeexplore.ieee.org/document/8047276) (KGE). It is highly
