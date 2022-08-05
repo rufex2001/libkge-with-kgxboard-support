@@ -535,6 +535,14 @@ entity_ranking:
     relation_type: False          # 1-to-1, 1-to-N, N-to-1, N-to-N
     argument_frequency: False     # 25%, 50%, 75%, top quantiles per argument
 
+  # dump top k predictions after evaluation
+  # for now, we only support dumping top predictions after filtering
+  predictions:
+    dump: False
+    top_k: 100
+    filename: "top_predictions_dump.txt"
+    # use readable strings instead of dataset IDs (if available)
+    use_strings: False
 
 # specific configuration options for evaluation via training loss
 training_loss:

@@ -7,6 +7,7 @@ import kge.job
 from kge.job import EvaluationJob, Job
 from kge import Config, Dataset
 from collections import defaultdict
+from kge.util.predictions_report import predictions_report_kgxboard
 
 
 class EntityRankingJob(EvaluationJob):
@@ -50,6 +51,19 @@ class EntityRankingJob(EvaluationJob):
         if self.__class__ == EntityRankingJob:
             for f in Job.job_created_hooks:
                 f(self)
+
+        # dump predictions
+        # for now, we only support dumping top predictions after filtering
+        self._predictions = config.get("entity_ranking.predictions.dump")
+        self._predictions_top_k = config.get(
+            "entity_ranking.predictions.top_k"
+        )
+        self._predictions_filename = config.get(
+            "entity_ranking.predictions.filename"
+        )
+        self._predictions_use_strings = config.get(
+            "entity_ranking.predictions.use_strings"
+        )
 
     def _prepare(self):
         super()._prepare()
@@ -138,6 +152,19 @@ class EntityRankingJob(EvaluationJob):
         for f in self.pre_epoch_hooks:
             f(self)
 
+        # prepare main datastructure for dumping top k predictions
+        # IMPORTANT: by not keeping track of corresponding triples, we assume
+        #   the data loader is set to shuffle=False, which is the case in this
+        #   evaluation job.
+        # This is a dictionary of dictionaries as follows: {
+        #   entities: {sub: [list of entities], obj: [list of entities]},
+        #   scores: {sub: [list of scores], obj: [list of scores]},
+        #   rankings: {sub: [list of rankings], obj: [list of rankings]},
+        #   ties: {sub: [list of ties], obj: [list of ties]},
+        # }
+        if self._predictions:
+            top_predictions = defaultdict(lambda: defaultdict(list))
+
         # let's go
         epoch_time = -time.time()
         for batch_number, batch_coords in enumerate(self.loader):
@@ -174,6 +201,21 @@ class EntityRankingJob(EvaluationJob):
                     float("Inf"),
                 )
                 labels_for_ranking["_filt_test"] = test_labels
+
+            # prepare batch datastructure for dumping top k predictions
+            # this is a dictionary of dictionaries similar to top_predictions
+            if self._predictions:
+                batch_predictions = defaultdict(dict)
+                # init required tensors
+                for slot in ["sub", "obj"]:
+                    # entities tensors
+                    batch_predictions["entities"][slot] = torch.ones(
+                        len(batch), self._predictions_top_k
+                    ).to(self.device) * float("-Inf")
+                    # scores tensors
+                    batch_predictions["scores"][slot] = torch.ones(
+                        len(batch), self._predictions_top_k
+                    ).to(self.device) * float("-Inf")
 
             # create sparse labels tensor
             labels = kge.job.util.coord_to_sparse_tensor(
@@ -311,6 +353,36 @@ class EntityRankingJob(EvaluationJob):
                     ranks_and_ties_for_ranking["s" + ranking][1] += s_num_ties_chunk
                     ranks_and_ties_for_ranking["o" + ranking][0] += o_rank_chunk
                     ranks_and_ties_for_ranking["o" + ranking][1] += o_num_ties_chunk
+
+                    # keep track of top k predictions
+                    # currently only support for predictions after filtering
+                    target_filtering = "_filt"
+                    if filter_with_test:
+                        target_filtering = "_filt_test"
+                    if self._predictions and ranking == target_filtering:
+                        for slot, scores_slot in zip(["sub", "obj"], [scores_po, scores_sp]):
+                            # get top k scores
+                            top_scores_slot = batch_predictions["scores"][slot]
+                            topk_predictions_batch = torch.topk(
+                                torch.cat((scores_slot, top_scores_slot), dim=1),
+                                self._predictions_top_k,
+                                dim=1
+                            )
+                            # get candidates from top scores
+                            chunk_candidates = torch.arange(chunk_start, chunk_end).to(self.device)
+                            chunk_candidates = chunk_candidates.view(1, -1).expand(len(batch), -1)
+                            top_entities_slot = batch_predictions["entities"][slot]
+                            all_current_candidates = torch.cat(
+                                (chunk_candidates, top_entities_slot),
+                                dim=1
+                            )
+                            batch_predictions["entities"][slot] = torch.gather(
+                                input=all_current_candidates,
+                                dim=1,
+                                index=topk_predictions_batch.indices
+                            )
+                            # save current top k for batch
+                            batch_predictions["scores"][slot] = topk_predictions_batch.values
 
                 # we are done with the chunk
 
@@ -465,6 +537,27 @@ class EntityRankingJob(EvaluationJob):
             if filter_with_test:
                 merge_hist(hists_filt_test, batch_hists_filt_test)
 
+            # add batch top predictions to global predictions
+            if self._predictions:
+                if filter_with_test:
+                    # rankings + 1 for readability
+                    top_predictions["rankings"]["sub"].append(s_ranks_filt_test + 1)
+                    top_predictions["rankings"]["obj"].append(o_ranks_filt_test + 1)
+                    # ties - 1 because code counts correct answer as tie with itself
+                    top_predictions["ties"]["sub"].append(ranks_and_ties_for_ranking["s_filt_test"][1] - 1)
+                    top_predictions["ties"]["obj"].append(ranks_and_ties_for_ranking["o_filt_test"][1] - 1)
+                else:
+                    # rankings + 1 for readability
+                    top_predictions["rankings"]["sub"].append(s_ranks_filt + 1)
+                    top_predictions["rankings"]["obj"].append(o_ranks_filt + 1)
+                    # ties - 1 because code counts correct answer as tie with itself
+                    top_predictions["ties"]["sub"].append(ranks_and_ties_for_ranking["s_filt"][1] - 1)
+                    top_predictions["ties"]["obj"].append(ranks_and_ties_for_ranking["o_filt"][1] - 1)
+                top_predictions["scores"]["sub"].append(batch_predictions["scores"]["sub"])
+                top_predictions["scores"]["obj"].append(batch_predictions["scores"]["obj"])
+                top_predictions["entities"]["sub"].append(batch_predictions["entities"]["sub"])
+                top_predictions["entities"]["obj"].append(batch_predictions["entities"]["obj"])
+
         # we are done; compute final metrics
         self.config.print("\033[2K\r", end="", flush=True)  # clear line and go back
         for key, hist in hists.items():
@@ -481,9 +574,51 @@ class EntityRankingJob(EvaluationJob):
                 )
         epoch_time += time.time()
 
+        # dump predictions
+        if self._predictions:
+            # concat all batch predictions, scores and rankings
+            for slot in ["sub", "obj"]:
+                top_predictions["scores"][slot] = torch.cat(
+                    top_predictions["scores"][slot],
+                    dim=0
+                )
+                top_predictions["entities"][slot] = torch.cat(
+                    top_predictions["entities"][slot],
+                    dim=0
+                )
+                top_predictions["rankings"][slot] = torch.cat(
+                    top_predictions["rankings"][slot],
+                    dim=0
+                )
+                top_predictions["ties"][slot] = torch.cat(
+                    top_predictions["ties"][slot],
+                    dim=0
+                )
+            # dump 'em!
+            self._dump_top_k_predictions(top_predictions)
+
         # update trace with results
         self.current_trace["epoch"].update(
             dict(epoch_time=epoch_time, event="eval_completed", **metrics,)
+        )
+
+    def _dump_top_k_predictions(self, top_predictions):
+        """
+        Dumps top k predictions made by the model.
+
+        :param top_predictions: dict of dicts created during evaluation
+        """
+
+        # TODO here's where support for other formats besides KGxBoard
+        #   should be added
+        predictions_report_kgxboard(
+            top_predictions,
+            self.triples,
+            self.config,
+            self.dataset,
+            self.eval_split,
+            self._predictions_filename,
+            self._predictions_use_strings,
         )
 
     def _densify_chunk_of_labels(
