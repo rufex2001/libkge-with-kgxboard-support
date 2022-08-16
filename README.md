@@ -39,9 +39,10 @@ kge valid <folder> --entity_ranking.predictions.dump True \
                    --entity_ranking.predictions.use_strings True \
 ```
 
-To quickly test all of this out, you can download the checkpoint and config 
-files of one of the pretrained models available in LibKGE's README. For example, 
-this 
+The LibKGE models used in our paper are the pretrained models available
+in LibKGE's [repository](https://github.com/uma-pi1/kge). To quickly test all of 
+this out, you can download the checkpoint and config files of one of the 
+pretrained models available in LibKGE's README. For example, this 
 [pretrained model](http://web.informatik.uni-mannheim.de/pi1/iclr2020-models/fb15k-237-complex.pt) 
 and its 
 [config file](http://web.informatik.uni-mannheim.de/pi1/iclr2020-models/fb15k-237-complex.yaml).
